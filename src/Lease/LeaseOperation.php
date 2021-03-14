@@ -2,7 +2,6 @@
 
 namespace SlaveMarket\Lease;
 
-use Cassandra\Date;
 use DateInterval;
 use DatePeriod;
 use DateTime;
@@ -17,8 +16,8 @@ use SlaveMarket\SlavesRepository;
  */
 class LeaseOperation
 {
-
     const MAX_WORK_HOUR_COUNT = 16;
+
     /**
      * @var LeaseContractsRepository
      */
@@ -64,7 +63,7 @@ class LeaseOperation
         $slave = $this->slavesRepository->getById($request->slaveId);
 
         $contracts = $this->contractsRepository->getForSlave($request->slaveId, $period->start->format('Y-m-d'), $period->end->format('Y-m-d'));
-        if (($busyHours = $this->findBusyHours($contracts, $period))) {
+        if (($busyHours = $this->findBusyHours($contracts, $period, $master->isVIP()))) {
             $slaveId = $slave->getId();
             $slaveName = $slave->getName();
             $busyHoursString = implode(', ', $busyHours);
@@ -73,7 +72,7 @@ class LeaseOperation
             return $response;
         }
 
-        if (!$this->checkMaxHourCount($contracts)) {
+        if (!$this->checkMaxHourCount($period)) {
             $response->addError('Ошибка. Рабы не могут работать больше 16 часов в сутки.');
             return $response;
         }
@@ -143,11 +142,6 @@ class LeaseOperation
         return true;
     }
 
-    private function isSameDay($period): bool
-    {
-        return $period->start->format('Y-m-d') === $period->end->format('Y-m-d');
-    }
-
     /**
      * Сравнение часов каждого выбранного контракта с часами из желательного периода
      * TODO: Не выполено условие про расширяемость VIP. И тестов нет
@@ -165,8 +159,8 @@ class LeaseOperation
                     $datesSame = $contractHour->getDateTime() == $periodHour;
 
                     if (
-                        $datesSame && !$isCurrentMasterVIP ||
-                        $datesSame && $isCurrentMasterVIP && !$contract->master->isVIP()
+                        ($datesSame && !$isCurrentMasterVIP) ||
+                        ($datesSame && $isCurrentMasterVIP && $contract->master->isVIP())
                     ) {
                         $busyHours[] = $periodHour->format('Y-m-d h');
                     }
