@@ -126,7 +126,7 @@ class LeaseSeveralOperationTest extends TestCase
             $leaseRequest = new LeaseRequest();
             $leaseRequest->masterId = $master1->getId();
             $leaseRequest->slaveId = $slave1->getId();
-            $leaseRequest->timeFrom = '2017-01-01 01:30:00';
+            $leaseRequest->timeFrom = '2017-01-01 09:30:00';
             $leaseRequest->timeTo = '2017-01-02 02:01:00';
 
             // Операция аренды
@@ -139,6 +139,6 @@ class LeaseSeveralOperationTest extends TestCase
         // -- Assert
         $this->assertEmpty($response->getErrors());
         $this->assertInstanceOf(LeaseContract::class, $response->getLeaseContract());
-        $this->assertEquals(20 * (16 + 3), $response->getLeaseContract()->price);
+        $this->assertEquals(20 * (15 + 3), $response->getLeaseContract()->price);
     }
 }
