@@ -24,16 +24,22 @@ class LeaseContract
     /** @var LeaseHour[] Список арендованных часов */
     public $leasedHours = [];
 
-    public function __construct(Master $master, Slave $slave, float $price, array $leasedHours)
+    public function __construct(Master $master, Slave $slave, float $price, array $leasedHours = [])
     {
         $this->master      = $master;
         $this->slave       = $slave;
         $this->price       = $price;
-        $this->leasedHours = $leasedHours;
+        $this->leasedHours = $leasedHours ?? [];
     }
 
-    public function getInterval()
+    /**
+     * @param \DatePeriod $period
+     */
+    public function setLeasedHoursByPeriod(\DatePeriod $period)
     {
-        return count($this->leasedHours);
+        foreach ($period as $item) {
+            $this->leasedHours[] = new LeaseHour($item->format('Y-m-d H'));
+        }
     }
+
 }

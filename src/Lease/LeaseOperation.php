@@ -17,7 +17,7 @@ use SlaveMarket\SlavesRepository;
 class LeaseOperation
 {
 
-    const MAX_WORK_HOUR = 16;
+    const MAX_WORK_HOUR_COUNT = 16;
     /**
      * @var LeaseContractsRepository
      */
@@ -50,7 +50,7 @@ class LeaseOperation
     /**
      * Выполнить операцию
      *
-     * TODO Таймзоны, функция округления дат, создание текста ошибок
+     * TODO Таймзоны, функция округления дат, обработка ошибок
      * @param LeaseRequest $request
      * @return LeaseResponse
      * @throws Exception
@@ -68,33 +68,59 @@ class LeaseOperation
         $step = new DateInterval('PT1H');
         $period = new DatePeriod($timeFrom, $step, $timeTo);
 
-        if ($timeFrom->format('Y-m-d') === $timeFrom->format('Y-m-d')) {
+        $contracts = $this->contractsRepository->getForSlave($request->slaveId, $timeFrom->format('Y-m-d'), $timeTo->format('Y-m-d'));
+
+        if ($busyHours = $this->findBusyHours($contracts, $period)) {
+            $slave = $this->slavesRepository->getById($request->slaveId);
+            $slaveId = $slave->getId();
+            $slaveName = $slave->getName();
+            $busyHoursString = implode(', ', $busyHours);
+
+            $response->addError("Ошибка. Раб #$slaveId \"$slaveName\" занят. Занятые часы: $busyHoursString");
+            return $response;
+        }
+
+        if ($this->isSameDay($period)) {
 //            $this->oneDayLease();
 
-            $contracts = $this->contractsRepository->getForSlave($request->slaveId, $timeFrom->format('Y-m-d'), $timeTo->format('Y-m-d'));
-            if ($this->checkHourAvailablity($contracts, $period)) {
-
-                $slave = current($contracts)->slave; // TODO Костыль, взять из базы
-
-                $slaveId = $slave->getId();
-                $slaveName = $slave->getName();
-
-                $busyHours = $this->getBusyHours($contracts, $period);
-                $busyHoursString = implode(', ', $busyHours);
-                $response->addError("Ошибка. Раб #$slaveId \"$slaveName\" занят. Занятые часы: $busyHoursString");
-            }
 
             if (!$this->checkMaxHourCount($contracts)) {
                 $response->addError('Ошибка. Рабы не могут работать больше 16 часов в сутки.');
+                return $response;
             }
+
+            $hours = iterator_count($period);
 
         } else {
 //            $this->severalDayLease();
+            $hoursInDays = [];
+            foreach ($period as $item) {
+                $currentDay = $hoursInDays[$item->format('Y-m-d')];
+                if ($currentDay < self::MAX_WORK_HOUR_COUNT) {
+                    $hoursInDays[$item->format('Y-m-d')]++;
+                }
+            }
+
+            $hours = array_sum($hoursInDays);
+
         }
 
+        $slave = $this->slavesRepository->getById($request->slaveId);
+        $master = $this->mastersRepository->getById($request->masterId);
+
+        $cost = $hours * $slave->getPricePerHour();
+        $leaseContract = new LeaseContract($master, $slave, $cost);
+        $leaseContract->setLeasedHoursByPeriod($period);
+        $response->setLeaseContract($leaseContract);
 
         return $response;
     }
+
+    private function isSameDay($period): bool
+    {
+        return $period->start->format('Y-m-d') === $period->end->format('Y-m-d');
+    }
+
 
     private function checkMaxHourCount($contracts): bool
     {
@@ -103,28 +129,8 @@ class LeaseOperation
             $hourCount += $contract->getInterval();
         }
 
-        if ($hourCount > self::MAX_WORK_HOUR) {
+        if ($hourCount > self::MAX_WORK_HOUR_COUNT) {
             return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * @param LeaseContract[] $contracts
-     * @param $period
-     * @return bool
-     */
-    private function checkHourAvailablity(array $contracts, DatePeriod $period): bool
-    {
-        foreach ($contracts as $contract) {
-            foreach ($contract->leasedHours as $contractHour) {
-                foreach ($period as $periodHour) {
-                    if ($contractHour == $periodHour) {
-                        return false;
-                    }
-                }
-            }
         }
 
         return true;
@@ -135,12 +141,11 @@ class LeaseOperation
      * @param DatePeriod $period
      * @return array
      */
-    private function getBusyHours(array $contracts, DatePeriod $period): array
+    private function findBusyHours(array $contracts, DatePeriod $period): array
     {
         foreach ($contracts as $contract) {
             foreach ($contract->leasedHours as $contractHour) {
                 foreach ($period as $periodHour) {
-//                        echo "<pre>\n"; var_dump($contractHour->getDateTime(),':', $periodHour); echo "\n</pre>";
                     if ($contractHour->getDateTime() == $periodHour) {
                         $busyHours[] = $periodHour->format('Y-m-d h');
                     }
