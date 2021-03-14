@@ -2,6 +2,7 @@
 
 namespace SlaveMarket\Lease;
 
+use Cassandra\Date;
 use DateInterval;
 use DatePeriod;
 use DateTime;
@@ -58,19 +59,12 @@ class LeaseOperation
     public function run(LeaseRequest $request): LeaseResponse
     {
         $response = new LeaseResponse();
+        $period = $this->getLeasePeriod($request->timeFrom, $request->timeTo);
+        $master = $this->mastersRepository->getById($request->masterId);
 
-        $timeFrom = new DateTime($request->timeFrom);
-        $timeFrom = new DateTime($timeFrom->format('Y-m-d h:00'));
+        $contracts = $this->contractsRepository->getForSlave($request->slaveId, $period->start->format('Y-m-d'), $period->end->format('Y-m-d'));
 
-        $timeTo = new DateTime($request->timeTo);
-        $timeTo = new DateTime($timeTo->format('Y-m-d h:01'));
-
-        $step = new DateInterval('PT1H');
-        $period = new DatePeriod($timeFrom, $step, $timeTo);
-
-        $contracts = $this->contractsRepository->getForSlave($request->slaveId, $timeFrom->format('Y-m-d'), $timeTo->format('Y-m-d'));
-
-        if ($busyHours = $this->findBusyHours($contracts, $period)) {
+        if (($busyHours = $this->findBusyHours($contracts, $period))) {
             $slave = $this->slavesRepository->getById($request->slaveId);
             $slaveId = $slave->getId();
             $slaveName = $slave->getName();
@@ -81,39 +75,58 @@ class LeaseOperation
         }
 
         if ($this->isSameDay($period)) {
-//            $this->oneDayLease();
-
-
             if (!$this->checkMaxHourCount($contracts)) {
                 $response->addError('Ошибка. Рабы не могут работать больше 16 часов в сутки.');
                 return $response;
             }
-
-            $hours = iterator_count($period);
-
-        } else {
-//            $this->severalDayLease();
-            $hoursInDays = [];
-            foreach ($period as $item) {
-                $currentDay = $hoursInDays[$item->format('Y-m-d')];
-                if ($currentDay < self::MAX_WORK_HOUR_COUNT) {
-                    $hoursInDays[$item->format('Y-m-d')]++;
-                }
-            }
-
-            $hours = array_sum($hoursInDays);
-
         }
 
-        $slave = $this->slavesRepository->getById($request->slaveId);
-        $master = $this->mastersRepository->getById($request->masterId);
 
+        $slave = $this->slavesRepository->getById($request->slaveId);
+
+        $hours = $this->countLeaseDays($period);
         $cost = $hours * $slave->getPricePerHour();
+
         $leaseContract = new LeaseContract($master, $slave, $cost);
         $leaseContract->setLeasedHoursByPeriod($period);
         $response->setLeaseContract($leaseContract);
 
         return $response;
+    }
+
+    /**
+     * @param $timeFrom
+     * @param $timeTo
+     * @return DatePeriod
+     * @throws Exception
+     */
+    private function getLeasePeriod($timeFrom, $timeTo): DatePeriod
+    {
+        $timeFrom = new DateTime($timeFrom);
+        $timeFrom = new DateTime($timeFrom->format('Y-m-d h:00'));
+
+        $timeTo = new DateTime($timeTo);
+        $timeTo = new DateTime($timeTo->format('Y-m-d h:01'));
+
+        $step = new DateInterval('PT1H');
+        return new DatePeriod($timeFrom, $step, $timeTo);
+    }
+
+    /**
+     * @param $period
+     * @return int
+     */
+    private function countLeaseDays($period): int
+    {
+        $hoursInDays = [];
+        foreach ($period as $item) {
+            $currentDay = $hoursInDays[$item->format('Y-m-d')];
+            if ($currentDay < self::MAX_WORK_HOUR_COUNT) {
+                $hoursInDays[$item->format('Y-m-d')]++;
+            }
+        }
+
+        return array_sum($hoursInDays);
     }
 
     private function isSameDay($period): bool
@@ -137,16 +150,25 @@ class LeaseOperation
     }
 
     /**
+     * Сравнение часов каждого выбранного контракта с часами из желательного периода
+     * TODO: Не выполено условие про расширяемость VIP. И тестов нет
+     *
      * @param LeaseContract[] $contracts
      * @param DatePeriod $period
+     * @param bool $isCurrentMasterVIP
      * @return array
      */
-    private function findBusyHours(array $contracts, DatePeriod $period): array
+    private function findBusyHours(array $contracts, DatePeriod $period, $isCurrentMasterVIP = false): array
     {
         foreach ($contracts as $contract) {
             foreach ($contract->leasedHours as $contractHour) {
                 foreach ($period as $periodHour) {
-                    if ($contractHour->getDateTime() == $periodHour) {
+                    $datesSame = $contractHour->getDateTime() == $periodHour;
+
+                    if (
+                        $datesSame && !$isCurrentMasterVIP ||
+                        $datesSame && $isCurrentMasterVIP && $contract->master->isVIP()
+                    ) {
                         $busyHours[] = $periodHour->format('Y-m-d h');
                     }
                 }
@@ -154,16 +176,6 @@ class LeaseOperation
         }
 
         return $busyHours ?? [];
-    }
-
-    private function oneDayLease()
-    {
-
-    }
-
-    private function severalDayLease()
-    {
-
     }
 
 }
