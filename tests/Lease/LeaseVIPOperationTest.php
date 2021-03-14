@@ -13,7 +13,7 @@ use SlaveMarket\SlavesRepository;
  *
  * @package SlaveMarket\Lease
  */
-class LeaseOperationTest extends TestCase
+class LeaseVIPOperationTest extends TestCase
 {
     /**
      * Stub репозитория хозяев
