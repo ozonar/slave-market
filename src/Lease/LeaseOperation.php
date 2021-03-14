@@ -167,7 +167,7 @@ class LeaseOperation
 
                     if (
                         $datesSame && !$isCurrentMasterVIP ||
-                        $datesSame && $isCurrentMasterVIP && $contract->master->isVIP()
+                        $datesSame && $isCurrentMasterVIP && !$contract->master->isVIP()
                     ) {
                         $busyHours[] = $periodHour->format('Y-m-d h');
                     }
