@@ -51,7 +51,7 @@ class LeaseOperation
     /**
      * Выполнить операцию
      *
-     * TODO Таймзоны, функция округления дат, обработка ошибок
+     * TODO Таймзоны, функция округления дат, обработка текста ошибок
      * @param LeaseRequest $request
      * @return LeaseResponse
      * @throws Exception
@@ -61,11 +61,10 @@ class LeaseOperation
         $response = new LeaseResponse();
         $period = $this->getLeasePeriod($request->timeFrom, $request->timeTo);
         $master = $this->mastersRepository->getById($request->masterId);
+        $slave = $this->slavesRepository->getById($request->slaveId);
 
         $contracts = $this->contractsRepository->getForSlave($request->slaveId, $period->start->format('Y-m-d'), $period->end->format('Y-m-d'));
-
         if (($busyHours = $this->findBusyHours($contracts, $period))) {
-            $slave = $this->slavesRepository->getById($request->slaveId);
             $slaveId = $slave->getId();
             $slaveName = $slave->getName();
             $busyHoursString = implode(', ', $busyHours);
@@ -74,15 +73,10 @@ class LeaseOperation
             return $response;
         }
 
-        if ($this->isSameDay($period)) {
-            if (!$this->checkMaxHourCount($contracts)) {
-                $response->addError('Ошибка. Рабы не могут работать больше 16 часов в сутки.');
-                return $response;
-            }
+        if (!$this->checkMaxHourCount($contracts)) {
+            $response->addError('Ошибка. Рабы не могут работать больше 16 часов в сутки.');
+            return $response;
         }
-
-
-        $slave = $this->slavesRepository->getById($request->slaveId);
 
         $hours = $this->countLeaseDays($period);
         $cost = $hours * $slave->getPricePerHour();
@@ -129,24 +123,29 @@ class LeaseOperation
         return array_sum($hoursInDays);
     }
 
-    private function isSameDay($period): bool
+    /**
+     * @param $period
+     * @return int
+     */
+    private function checkMaxHourCount($period): int
     {
-        return $period->start->format('Y-m-d') === $period->end->format('Y-m-d');
-    }
-
-
-    private function checkMaxHourCount($contracts): bool
-    {
-        $hourCount = 0;
-        foreach ($contracts as $contract) {
-            $hourCount += $contract->getInterval();
+        $hoursInDays = [];
+        foreach ($period as $item) {
+            $hoursInDays[$item->format('Y-m-d')]++;
         }
 
-        if ($hourCount > self::MAX_WORK_HOUR_COUNT) {
-            return false;
+        foreach ($hoursInDays as $hoursInDay) {
+            if ($hoursInDay > 16 && $hoursInDay < 24) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    private function isSameDay($period): bool
+    {
+        return $period->start->format('Y-m-d') === $period->end->format('Y-m-d');
     }
 
     /**

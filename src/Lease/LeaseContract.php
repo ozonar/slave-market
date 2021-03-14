@@ -32,6 +32,11 @@ class LeaseContract
         $this->leasedHours = $leasedHours ?? [];
     }
 
+    public function getIntervalCount()
+    {
+        return count($this->leasedHours);
+    }
+
     /**
      * @param \DatePeriod $period
      */
