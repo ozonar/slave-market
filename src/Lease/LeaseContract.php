@@ -31,4 +31,9 @@ class LeaseContract
         $this->price       = $price;
         $this->leasedHours = $leasedHours;
     }
+
+    public function getInterval()
+    {
+        return count($this->leasedHours);
+    }
 }
